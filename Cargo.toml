@@ -1,0 +1,8 @@
+[package]
+name = "RustyCloud"
+version = "0.1.0"
+authors = ["Kevin Per <kevp.per@gmail.com>"]
+
+[dependencies]
+rustful= "0.9"
+rustc-serialize = "*"
