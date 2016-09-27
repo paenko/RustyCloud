@@ -1,15 +1,29 @@
 #[macro_use]
 extern crate rustful;
 extern crate rustc_serialize;
+extern crate uuid;
+extern crate bincode;
+
+use std::io;
+use std::io::prelude::*;
 
 use rustful::{Server, Context, Response, TreeRouter, Handler};
+
+use rustc_serialize::Encodable;
 use rustc_serialize::json;
-use std::fmt::{Display, Formatter, Result};
+use bincode::rustc_serialize::{encode_into, encode, decode, decode_from};
+use bincode::SizeLimit;
+
+use std::fmt::{Display, Formatter};
+
+use std::fs::{File, read_dir, remove_file};
+
+use uuid::Uuid;
 
 fn get_files(context: Context, response: Response) {
     let fileId = match context.variables.get("fileId") {
         Some(id) => {
-            let files = File::get_all();
+            let files = rcFile::get_all();
             response.send(format!("test"))
             //            response.send(format!("{:?}",
         }
@@ -36,9 +50,10 @@ fn main() {
 }
 
 #[derive(RustcEncodable,RustcDecodable)]
-struct File {
+struct rcFile {
     filename: String,
-    path: String,
+    fileId: Uuid,
+    payload: Vec<u8>,
 }
 
 enum Route_Handler_Methods {
@@ -50,35 +65,60 @@ enum Route_Handler_Methods {
 
 struct Route_Handler(Route_Handler_Methods);
 
-impl File {
-    fn get_all() -> Vec<File> {
-        let files: Vec<File> = Vec::new();
+impl rcFile {
+    fn new(filename: String, fileId: Uuid, payload: Vec<u8>) -> Self {
+        rcFile {
+            filename: filename,
+            fileId: fileId,
+            payload: payload,
+        }
+    }
+
+    fn get_all() -> Vec<String> {
+        let mut files: Vec<String> = Vec::new();
+        let paths = read_dir("./data").unwrap();
+
+        for path in paths {
+            let file: String = path.unwrap().path().to_str().unwrap().to_string();
+            files.push(file);
+        }
 
         files
     }
 
-    fn get(fileId: &str) -> File {
-        File {
-            filename: "test".to_string(),
-            path: "test".to_string(),
-        }
+    fn get(fileId: Uuid) -> rcFile {
+        let file: rcFile = decode_from(&mut File::open(format!("./data/{}", fileId)).unwrap(),
+                                       SizeLimit::Infinite)
+            .unwrap();
+
+        file
     }
 
-    fn post() {}
+    fn post(fileId: Uuid, filename: String, payload: Vec<u8>) {
+        let mut f = File::open(format!("./data/{}", filename)).unwrap();
+        let rc = rcFile::new(filename, fileId, payload);
 
-    fn delete() {}
+        encode_into(&rc, &mut f, SizeLimit::Infinite);
+    }
+
+    fn delete(fileId: Uuid) {
+        remove_file(format!("./data/{}", fileId));
+    }
 }
 
 impl Handler for Route_Handler {
     fn handle_request(&self, context: Context, response: Response) {
         match self.0 {
             Route_Handler_Methods::get_all => {
-                let json = json::encode(&File::get_all()).unwrap();
+                let json = json::encode(&rcFile::get_all()).unwrap();
 
                 response.send(json);
             }
             Route_Handler_Methods::get => {
-                let json = json::encode(&File::get(&context.variables.get("fileid").unwrap()))
+                let json = json::encode(&rcFile::get(Uuid::parse_str(&context.variables
+                            .get("fileid")
+                            .unwrap())
+                        .unwrap()))
                     .unwrap();
 
                 response.send(json);

@@ -6,3 +6,5 @@ authors = ["Kevin Per <kevp.per@gmail.com>"]
 [dependencies]
 rustful= "0.9"
 rustc-serialize = "*"
+uuid = {version="*",features=["rustc-serialize","v4"]}
+bincode = "*"
