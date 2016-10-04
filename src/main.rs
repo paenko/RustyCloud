@@ -11,7 +11,8 @@ use rustful::{Server, Context, Response, TreeRouter, Handler};
 
 use rustc_serialize::Encodable;
 use rustc_serialize::json;
-use bincode::rustc_serialize::{encode_into, encode, decode, decode_from};
+use bincode::rustc_serialize::{encode_into, encode, decode, decode_from, EncodingError,
+                               DecodingError};
 use bincode::SizeLimit;
 
 use std::fmt::{Display, Formatter};
@@ -20,7 +21,10 @@ use std::fs::{File, read_dir, remove_file};
 
 use uuid::Uuid;
 
+use std::error::Error;
 use std::fs::OpenOptions;
+
+use std::io::Error as IoError;
 
 fn get_files(context: Context, response: Response) {
     let fileId = match context.variables.get("fileId") {
@@ -88,24 +92,29 @@ impl rcFile {
         files
     }
 
-    fn get(fileId: Uuid) -> rcFile {
-        let file: rcFile = decode_from(&mut File::open(format!("./data/{}", fileId)).unwrap(),
-                                       SizeLimit::Infinite)
-            .unwrap();
+    fn get(fileId: Uuid) -> Result<rcFile, DecodingError> {
+        let file: rcFile = try!(decode_from(&mut File::open(format!("./data/{}", fileId))
+                                                .unwrap(),
+                                            SizeLimit::Infinite));
 
-        file
+        Ok(file)
     }
 
-    fn post(fileId: Uuid, filename: String, payload: Vec<u8>) {
+    // TODO error_handling for OpenOptions
+    fn post(fileId: Uuid, filename: String, payload: Vec<u8>) -> Result<rcFile, EncodingError> {
         let mut f =
             OpenOptions::new().write(true).create(true).open(format!("./data/{}", fileId)).unwrap();
         let rc = rcFile::new(filename, fileId, payload);
 
-        encode_into(&rc, &mut f, SizeLimit::Infinite);
+        try!(encode_into(&rc, &mut f, SizeLimit::Infinite));
+
+        Ok(rc)
     }
 
-    fn delete(fileId: Uuid) {
-        remove_file(format!("./data/{}", fileId));
+    fn delete(fileId: Uuid) -> Result<(), IoError> {
+        try!(remove_file(format!("./data/{}", fileId)));
+
+        Ok(())
     }
 }
 
@@ -118,13 +127,12 @@ impl Handler for Route_Handler {
                 response.send(json);
             }
             Route_Handler_Methods::get => {
-                let json = json::encode(&rcFile::get(Uuid::parse_str(&context.variables
-                            .get("fileid")
-                            .unwrap())
-                        .unwrap()))
-                    .unwrap();
+                let fileId = Uuid::parse_str(&context.variables.get("fileId").unwrap()).unwrap();
 
-                response.send(json);
+                match rcFile::get(fileId) {
+                    Ok(d) => response.send(json::encode(&d).unwrap()),
+                    Err(err) => response.send(err.description()),
+                }
             }
             Route_Handler_Methods::post => {
                 let body = match context.body.read_json_body() {
@@ -138,21 +146,29 @@ impl Handler for Route_Handler {
                             None => Vec::new(),
                         };
 
-                        rcFile::post(fileId, filename, payload);
+                        match rcFile::post(fileId, filename, payload) {
+                            Ok(f) => response.send(format!("{}", fileId)),
+                            Err(err) => response.send(err.description()),
+                        }
 
-                        response.send(format!("{}", fileId));
                     }
-                    Err(err) => return,
+                    Err(err) => {
+                        response.send("Could not read body! Are you sure that it is valid json?")
+                    }
                 };
             }
             Route_Handler_Methods::delete => {
-                let res = json::encode(&rcFile::delete(Uuid::parse_str(&context.variables
-                            .get("fileid")
-                            .unwrap())
-                        .unwrap()))
-                    .unwrap();
-
-                response.send(res);
+                match Uuid::parse_str(&context.variables
+                    .get("fileId")
+                    .unwrap()) {
+                    Ok(id) => {
+                        match rcFile::delete(id) {
+                            Ok(_) => response.send("Ok"),
+                            Err(err) => response.send(err.description()),
+                        }
+                    }
+                    Err(err) => response.send("Could not parse FileId"),
+                }
             }
         }
     }
