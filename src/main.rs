@@ -20,6 +20,8 @@ use std::fs::{File, read_dir, remove_file};
 
 use uuid::Uuid;
 
+use std::fs::OpenOptions;
+
 fn get_files(context: Context, response: Response) {
     let fileId = match context.variables.get("fileId") {
         Some(id) => {
@@ -95,7 +97,8 @@ impl rcFile {
     }
 
     fn post(fileId: Uuid, filename: String, payload: Vec<u8>) {
-        let mut f = File::open(format!("./data/{}", filename)).unwrap();
+        let mut f =
+            OpenOptions::new().write(true).create(true).open(format!("./data/{}", fileId)).unwrap();
         let rc = rcFile::new(filename, fileId, payload);
 
         encode_into(&rc, &mut f, SizeLimit::Infinite);
@@ -107,7 +110,7 @@ impl rcFile {
 }
 
 impl Handler for Route_Handler {
-    fn handle_request(&self, context: Context, response: Response) {
+    fn handle_request(&self, mut context: Context, mut response: Response) {
         match self.0 {
             Route_Handler_Methods::get_all => {
                 let json = json::encode(&rcFile::get_all()).unwrap();
@@ -123,8 +126,34 @@ impl Handler for Route_Handler {
 
                 response.send(json);
             }
-            Route_Handler_Methods::post => {}
-            Route_Handler_Methods::delete => {}
+            Route_Handler_Methods::post => {
+                let body = match context.body.read_json_body() {
+                    Ok(body) => {
+                        let fileId = Uuid::new_v4();
+                        let filename =
+                            body.find("filename").and_then(|s| s.as_string()).unwrap().to_string();
+                        let payload = match body.find("payload")
+                            .and_then(|s| s.as_string()) {
+                            Some(s) => s.as_bytes().to_vec(),
+                            None => Vec::new(),
+                        };
+
+                        rcFile::post(fileId, filename, payload);
+
+                        response.send(format!("{}", fileId));
+                    }
+                    Err(err) => return,
+                };
+            }
+            Route_Handler_Methods::delete => {
+                let res = json::encode(&rcFile::delete(Uuid::parse_str(&context.variables
+                            .get("fileid")
+                            .unwrap())
+                        .unwrap()))
+                    .unwrap();
+
+                response.send(res);
+            }
         }
     }
 }
