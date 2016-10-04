@@ -25,6 +25,7 @@ use std::error::Error;
 use std::fs::OpenOptions;
 
 use std::io::Error as IoError;
+use std::io::Cursor;
 
 fn get_files(context: Context, response: Response) {
     let fileId = match context.variables.get("fileId") {
@@ -137,12 +138,22 @@ impl Handler for Route_Handler {
             Route_Handler_Methods::post => {
                 let body = match context.body.read_json_body() {
                     Ok(body) => {
+                        println!("{:?}", body);
                         let fileId = Uuid::new_v4();
                         let filename =
                             body.find("filename").and_then(|s| s.as_string()).unwrap().to_string();
                         let payload = match body.find("payload")
-                            .and_then(|s| s.as_string()) {
-                            Some(s) => s.as_bytes().to_vec(),
+                            .and_then(|s| s.as_array()) {
+                            Some(s) => {
+
+                                let mut bigbuffer: Vec<u64> =
+                                    s.into_iter().map(|s| s.as_u64().unwrap()).collect();
+
+
+                                let mut littlebuffer: Vec<u8> = as_u8s(&bigbuffer).to_vec();
+
+                                littlebuffer
+                            }
                             None => Vec::new(),
                         };
 
@@ -171,5 +182,12 @@ impl Handler for Route_Handler {
                 }
             }
         }
+    }
+}
+
+fn as_u8s<'a, T>(vec: &'a [T]) -> &'a [u8] {
+    unsafe {
+        std::mem::transmute(std::slice::from_raw_parts(vec.as_ptr() as *mut () as *mut u8,
+                                                       vec.len() * std::mem::size_of::<T>()))
     }
 }
