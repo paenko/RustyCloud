@@ -7,6 +7,7 @@ extern crate iron;
 extern crate router;
 extern crate params;
 
+extern crate byteorder;
 
 use iron::status;
 use router::Router;
@@ -32,9 +33,13 @@ use std::error::Error;
 use std::fs::OpenOptions;
 
 use std::io::Error as IoError;
-use std::io::Cursor;
 
 use std::net::{SocketAddrV4, Ipv4Addr};
+
+use std::io::Cursor;
+use byteorder::{BigEndian, ReadBytesExt};
+
+use std::mem::transmute;
 
 fn http_all_get(req: &mut Request) -> IronResult<Response> {
     let files = rcFile::get_all();
@@ -67,10 +72,29 @@ fn http_post(req: &mut Request) -> IronResult<Response> {
         Some(&Value::String(ref filename)) => {
             match map.find(&["payload"]) {
                 Some(&Value::String(ref payload)) => {
+                    println!("{}", payload);
                     let mut bytes = Vec::new();
                     bytes.extend_from_slice(payload.as_bytes());
 
                     let rc = rcFile::post(Uuid::new_v4(), filename.to_string(), bytes).unwrap();
+
+                    let json = json::encode(&rc).unwrap();
+
+                    Ok(Response::with((status::Ok, json)))
+                }
+                Some(&Value::Array(ref a)) => {
+                    let mut payload: Vec<u8> = Vec::new();
+
+                    for b in a {
+                        let s = match *b {
+                            Value::U64(v) => v.clone(),
+                            _ => unimplemented!(),
+                        };
+
+                        payload.push(s as u8);
+                    }
+
+                    let rc = rcFile::post(Uuid::new_v4(), filename.to_string(), payload).unwrap();
 
                     let json = json::encode(&rc).unwrap();
 
