@@ -8,3 +8,6 @@ rustful= "0.9"
 rustc-serialize = "*"
 uuid = {version="*",features=["rustc-serialize","v4"]}
 bincode = "*"
+iron = "*"
+router = "*"
+params = "*"
