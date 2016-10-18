@@ -18,7 +18,7 @@ use std::io;
 use std::io::prelude::*;
 
 use rustc_serialize::Encodable;
-use rustc_serialize::json;
+use rustc_serialize::json::{self, ToJson, Json};
 use bincode::rustc_serialize::{encode_into, encode, decode, decode_from, EncodingError,
                                DecodingError};
 use bincode::SizeLimit;
@@ -68,27 +68,19 @@ fn http_get(req: &mut Request) -> IronResult<Response> {
 fn http_post(req: &mut Request) -> IronResult<Response> {
     let map = req.get_ref::<Params>().unwrap();
 
-    let res = match map.find(&["filename"]) {
-        Some(&Value::String(ref filename)) => {
-            match map.find(&["payload"]) {
-                Some(&Value::String(ref payload)) => {
-                    let rc =
-                        rcFile::post(Uuid::new_v4(), filename.to_string(), payload.to_string())
-                            .unwrap();
+    let js: Json = json::Json::from_str(&format!("{:?}", map)).unwrap();
 
-                    let json = json::encode(&rc).unwrap();
+    let doc: rcFile = json::decode(&js.to_string()).unwrap();
 
-                    Ok(Response::with((status::Ok, json)))
-                }
-                _ => Ok(Response::with((status::InternalServerError, "Error cannot find payload"))),
-            }
-        }
-        _ => Ok(Response::with((status::InternalServerError, "Error cannot find filename"))),
-    };
-
-    res
+    Ok(Response::with((status::Ok, json::encode(&doc).unwrap())))
 }
 
+fn http_sync_get(req: &mut Request) -> IronResult<Response> {
+    unimplemented!()
+}
+fn http_sync_post(req: &mut Request) -> IronResult<Response> {
+    unimplemented!()
+}
 fn http_delete(req: &mut Request) -> IronResult<Response> {
     let ref fileId = req.extensions
         .get::<Router>()
@@ -108,6 +100,8 @@ fn main() {
     let mut router = Router::new();
     router.get("/files", http_all_get, "get_files");
     router.get("/files/:fileId", http_get, "get_file");
+    router.get("/file/sync", http_sync_get, "http_sync_get");
+    router.post("/file/sync", http_sync_post, "http_sync_post");
     router.post("/file", http_post, "post_file");
     router.delete("/files/:fileId", http_delete, "delete_file");
 
@@ -116,7 +110,7 @@ fn main() {
     println!("Server started on port 8080");
 }
 
-#[derive(RustcEncodable,RustcDecodable)]
+#[derive(RustcEncodable,RustcDecodable,Debug)]
 struct rcFile {
     filename: String,
     fileId: Uuid,
