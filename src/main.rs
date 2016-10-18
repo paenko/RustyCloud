@@ -72,29 +72,9 @@ fn http_post(req: &mut Request) -> IronResult<Response> {
         Some(&Value::String(ref filename)) => {
             match map.find(&["payload"]) {
                 Some(&Value::String(ref payload)) => {
-                    println!("{}", payload);
-                    let mut bytes = Vec::new();
-                    bytes.extend_from_slice(payload.as_bytes());
-
-                    let rc = rcFile::post(Uuid::new_v4(), filename.to_string(), bytes).unwrap();
-
-                    let json = json::encode(&rc).unwrap();
-
-                    Ok(Response::with((status::Ok, json)))
-                }
-                Some(&Value::Array(ref a)) => {
-                    let mut payload: Vec<u8> = Vec::new();
-
-                    for b in a {
-                        let s = match *b {
-                            Value::U64(v) => v.clone(),
-                            _ => unimplemented!(),
-                        };
-
-                        payload.push(s as u8);
-                    }
-
-                    let rc = rcFile::post(Uuid::new_v4(), filename.to_string(), payload).unwrap();
+                    let rc =
+                        rcFile::post(Uuid::new_v4(), filename.to_string(), payload.to_string())
+                            .unwrap();
 
                     let json = json::encode(&rc).unwrap();
 
@@ -140,11 +120,11 @@ fn main() {
 struct rcFile {
     filename: String,
     fileId: Uuid,
-    payload: Vec<u8>,
+    payload: String,
 }
 
 impl rcFile {
-    fn new(filename: String, fileId: Uuid, payload: Vec<u8>) -> Self {
+    fn new(filename: String, fileId: Uuid, payload: String) -> Self {
         rcFile {
             filename: filename,
             fileId: fileId,
@@ -173,7 +153,7 @@ impl rcFile {
     }
 
     // TODO error_handling for OpenOptions
-    fn post(fileId: Uuid, filename: String, payload: Vec<u8>) -> Result<rcFile, EncodingError> {
+    fn post(fileId: Uuid, filename: String, payload: String) -> Result<rcFile, EncodingError> {
         let mut f =
             OpenOptions::new().write(true).create(true).open(format!("./data/{}", fileId)).unwrap();
         let rc = rcFile::new(filename, fileId, payload);
