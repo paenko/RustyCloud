@@ -9,6 +9,8 @@ extern crate params;
 
 extern crate byteorder;
 
+extern crate chrono;
+
 use iron::status;
 use router::Router;
 use iron::prelude::*;
@@ -40,6 +42,8 @@ use std::io::Cursor;
 use byteorder::{BigEndian, ReadBytesExt};
 
 use std::mem::transmute;
+
+use chrono::*;
 
 fn http_all_get(req: &mut Request) -> IronResult<Response> {
     let files = rcFile::get_all();
@@ -115,14 +119,16 @@ struct rcFile {
     filename: String,
     fileId: Uuid,
     payload: String,
+    lastEdited: DateTime<UTC>,
 }
 
 impl rcFile {
-    fn new(filename: String, fileId: Uuid, payload: String) -> Self {
+    fn new(filename: String, fileId: Uuid, payload: String, lastEdited: DateTime<UTC>) -> Self {
         rcFile {
             filename: filename,
             fileId: fileId,
             payload: payload,
+            lastEdited: lastEdited,
         }
     }
 
@@ -147,10 +153,14 @@ impl rcFile {
     }
 
     // TODO error_handling for OpenOptions
-    fn post(fileId: Uuid, filename: String, payload: String) -> Result<rcFile, EncodingError> {
+    fn post(fileId: Uuid,
+            filename: String,
+            payload: String,
+            lastEdited: DateTime<UTC>)
+            -> Result<rcFile, EncodingError> {
         let mut f =
             OpenOptions::new().write(true).create(true).open(format!("./data/{}", fileId)).unwrap();
-        let rc = rcFile::new(filename, fileId, payload);
+        let rc = rcFile::new(filename, fileId, payload, lastEdited);
 
         try!(encode_into(&rc, &mut f, SizeLimit::Infinite));
 
