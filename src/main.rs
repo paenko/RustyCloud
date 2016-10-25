@@ -14,18 +14,11 @@ extern crate chrono;
 use iron::status;
 use router::Router;
 use iron::prelude::*;
-use params::{Params, Value};
+use params::Params;
 
-use std::io;
-use std::io::prelude::*;
-
-use rustc_serialize::Encodable;
-use rustc_serialize::json::{self, ToJson, Json};
-use bincode::rustc_serialize::{encode_into, encode, decode, decode_from, EncodingError,
-                               DecodingError};
+use rustc_serialize::json::{self, Json};
+use bincode::rustc_serialize::{encode_into, decode_from, EncodingError, DecodingError};
 use bincode::SizeLimit;
-
-use std::fmt::{Display, Formatter};
 
 use std::fs::{File, read_dir, remove_file};
 
@@ -38,15 +31,10 @@ use std::io::Error as IoError;
 
 use std::net::{SocketAddrV4, Ipv4Addr};
 
-use std::io::Cursor;
-use byteorder::{BigEndian, ReadBytesExt};
-
-use std::mem::transmute;
-
 use chrono::*;
 
 fn http_all_get(req: &mut Request) -> IronResult<Response> {
-    let files = rcFile::get_all();
+    let files = RcFile::get_all();
 
     let json = json::encode(&files).unwrap();
 
@@ -54,13 +42,13 @@ fn http_all_get(req: &mut Request) -> IronResult<Response> {
 }
 
 fn http_get(req: &mut Request) -> IronResult<Response> {
-    let ref fileId = req.extensions
+    let ref file_id = req.extensions
         .get::<Router>()
         .unwrap()
-        .find("fileId")
+        .find("file_id")
         .unwrap();
 
-    let document: rcFile = rcFile::get(Uuid::parse_str(fileId).unwrap()).unwrap();
+    let document: RcFile = RcFile::get(Uuid::parse_str(file_id).unwrap()).unwrap();
 
     let json: String = json::encode(&document).unwrap();
 
@@ -74,7 +62,7 @@ fn http_post(req: &mut Request) -> IronResult<Response> {
 
     let js: Json = json::Json::from_str(&format!("{:?}", map)).unwrap();
 
-    let doc: rcFile = json::decode(&js.to_string()).unwrap();
+    let doc: RcFile = json::decode(&js.to_string()).unwrap();
 
     Ok(Response::with((status::Ok, json::encode(&doc).unwrap())))
 }
@@ -86,13 +74,13 @@ fn http_sync_post(req: &mut Request) -> IronResult<Response> {
     unimplemented!()
 }
 fn http_delete(req: &mut Request) -> IronResult<Response> {
-    let ref fileId = req.extensions
+    let ref file_id = req.extensions
         .get::<Router>()
         .unwrap()
-        .find("fileId")
+        .find("file_id")
         .unwrap();
 
-    let res = match rcFile::delete(Uuid::parse_str(fileId).unwrap()) {
+    let res = match RcFile::delete(Uuid::parse_str(file_id).unwrap()) {
         Ok(_) => Response::with((status::Ok)),
         Err(err) => Response::with((status::InternalServerError, err.description())),
     };
@@ -103,11 +91,11 @@ fn http_delete(req: &mut Request) -> IronResult<Response> {
 fn main() {
     let mut router = Router::new();
     router.get("/files", http_all_get, "get_files");
-    router.get("/files/:fileId", http_get, "get_file");
+    router.get("/files/:file_id", http_get, "get_file");
     router.get("/file/sync", http_sync_get, "http_sync_get");
     router.post("/file/sync", http_sync_post, "http_sync_post");
     router.post("/file", http_post, "post_file");
-    router.delete("/files/:fileId", http_delete, "delete_file");
+    router.delete("/files/:file_id", http_delete, "delete_file");
 
     Iron::new(router).http(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
 
@@ -115,18 +103,18 @@ fn main() {
 }
 
 #[derive(RustcEncodable,RustcDecodable,Debug)]
-struct rcFile {
+struct RcFile {
     filename: String,
-    fileId: Uuid,
+    file_id: Uuid,
     payload: String,
     lastEdited: DateTime<UTC>,
 }
 
-impl rcFile {
-    fn new(filename: String, fileId: Uuid, payload: String, lastEdited: DateTime<UTC>) -> Self {
-        rcFile {
+impl RcFile {
+    fn new(filename: String, file_id: Uuid, payload: String, lastEdited: DateTime<UTC>) -> Self {
+        RcFile {
             filename: filename,
-            fileId: fileId,
+            file_id: file_id,
             payload: payload,
             lastEdited: lastEdited,
         }
@@ -144,8 +132,8 @@ impl rcFile {
         files
     }
 
-    fn get(fileId: Uuid) -> Result<rcFile, DecodingError> {
-        let file: rcFile = try!(decode_from(&mut File::open(format!("./data/{}", fileId))
+    fn get(file_id: Uuid) -> Result<RcFile, DecodingError> {
+        let file: RcFile = try!(decode_from(&mut File::open(format!("./data/{}", file_id))
                                                 .unwrap(),
                                             SizeLimit::Infinite));
 
@@ -153,22 +141,25 @@ impl rcFile {
     }
 
     // TODO error_handling for OpenOptions
-    fn post(fileId: Uuid,
+    fn post(file_id: Uuid,
             filename: String,
             payload: String,
             lastEdited: DateTime<UTC>)
-            -> Result<rcFile, EncodingError> {
-        let mut f =
-            OpenOptions::new().write(true).create(true).open(format!("./data/{}", fileId)).unwrap();
-        let rc = rcFile::new(filename, fileId, payload, lastEdited);
+            -> Result<RcFile, EncodingError> {
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(format!("./data/{}", file_id))
+            .unwrap();
+        let rc = RcFile::new(filename, file_id, payload, lastEdited);
 
         try!(encode_into(&rc, &mut f, SizeLimit::Infinite));
 
         Ok(rc)
     }
 
-    fn delete(fileId: Uuid) -> Result<(), IoError> {
-        try!(remove_file(format!("./data/{}", fileId)));
+    fn delete(file_id: Uuid) -> Result<(), IoError> {
+        try!(remove_file(format!("./data/{}", file_id)));
 
         Ok(())
     }

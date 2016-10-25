@@ -11,5 +11,4 @@ bincode = "*"
 iron = "*"
 router = "*"
 params = "*"
-byteorder = "0.5"
 chrono = { version = "0.2", features = [ "rustc-serialize"] }
