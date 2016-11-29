@@ -12,3 +12,4 @@ iron = "*"
 router = "*"
 params = "*"
 chrono = { version = "0.2", features = [ "rustc-serialize"] }
+base64 ="*"
