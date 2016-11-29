@@ -189,16 +189,14 @@ struct RcFile {
     filename: String,
     file_id: Uuid,
     payload: String,
-    lastEdited: DateTime<UTC>,
 }
 
 impl RcFile {
-    fn new(filename: String, file_id: Uuid, payload: String, lastEdited: DateTime<UTC>) -> Self {
+    fn new(filename: String, file_id: Uuid, payload: String) -> Self {
         RcFile {
             filename: filename,
             file_id: file_id,
             payload: payload,
-            lastEdited: lastEdited,
         }
     }
 
@@ -238,7 +236,7 @@ impl RcFile {
             .create(true)
             .open(format!("./data/{}", file_id))
             .unwrap();
-        let rc = RcFile::new(filename, file_id, payload, lastEdited);
+        let rc = RcFile::new(filename, file_id, payload);
 
         try!(encode_into(&rc, &mut f, SizeLimit::Infinite));
 
