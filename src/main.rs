@@ -5,13 +5,16 @@ extern crate bincode;
 extern crate iron;
 extern crate router;
 extern crate params;
-extern crate chrono;
 extern crate base64;
+extern crate chrono;
+extern crate hyper;
+extern crate bodyparser;
 
 use iron::status;
 use router::Router;
 use iron::prelude::*;
 use params::{Params, Value};
+use bodyparser::Json as bjson;
 
 use rustc_serialize::json::{self, Json};
 use bincode::rustc_serialize::{encode_into, decode_from, EncodingError, DecodingError};
@@ -19,20 +22,15 @@ use bincode::SizeLimit;
 
 use std::fs::{File, read_dir, remove_file, Metadata, metadata};
 use std::time::{SystemTime, UNIX_EPOCH};
-
 use uuid::Uuid;
-
 use std::error::Error;
 use std::fs::OpenOptions;
-
 use std::io::Error as IoError;
-
 use std::net::{SocketAddrV4, Ipv4Addr};
+use base64::{encode, decode};
+use std::rc::Rc;
 
 use chrono::*;
-use base64::{encode, decode};
-
-use std::rc::Rc;
 
 fn http_all_get(req: &mut Request) -> IronResult<Response> {
     let files = RcFile::get_all();
@@ -59,11 +57,9 @@ fn http_get(req: &mut Request) -> IronResult<Response> {
 }
 
 fn http_post(req: &mut Request) -> IronResult<Response> {
-    let map = req.get_ref::<Params>().unwrap();
+    let json_body = req.get::<bjson>().unwrap();
 
-    let js: Json = json::Json::from_str(&format!("{:?}", map)).unwrap();
-
-    let doc: RcFile = json::decode(&js.to_string()).unwrap();
+    let doc: RcFile = json::decode(&json_body.unwrap().to_string()).unwrap();
 
     let mut f = OpenOptions::new()
         .write(true)
@@ -73,7 +69,7 @@ fn http_post(req: &mut Request) -> IronResult<Response> {
 
     encode_into(&doc, &mut f, SizeLimit::Infinite);
 
-    Ok(Response::with((status::Ok, json::encode(&doc).unwrap())))
+    Ok(Response::with((status::Ok, json::encode(&doc.file_id).unwrap())))
 }
 
 
@@ -95,11 +91,9 @@ fn http_delete(req: &mut Request) -> IronResult<Response> {
 
 // Update on server
 fn http_push(req: &mut Request) -> IronResult<Response> {
-    let map = req.get_ref::<Params>().unwrap();
+    let json_body = req.get::<bjson>().unwrap();
 
-    let js: Json = json::Json::from_str(&format!("{:?}", map)).unwrap();
-
-    let doc: Vec<(Uuid, DateTime<UTC>)> = json::decode(&js.to_string()).unwrap();
+    let doc: Vec<(Uuid, DateTime<UTC>)> = json::decode(&json_body.unwrap().to_string()).unwrap();
 
     let mut requesting: Vec<Uuid> = Vec::new();
 
@@ -170,18 +164,27 @@ fn http_sync_file(req: &mut Request) -> IronResult<Response> {
 }
 
 fn main() {
-    let mut router = Router::new();
-    router.get("/files", http_all_get, "get_files");
-    router.get("/files/:file_id", http_get, "get_file");
-    router.post("/file/push", http_push, "http_push");
-    router.post("/file/pull", http_pull, "http_pull");
-    router.post("/file/sync", http_sync_file, "http_sync_file");
-    router.post("/file", http_post, "post_file");
-    router.delete("/files/:file_id", http_delete, "delete_file");
+    Server::run();
+}
 
-    Iron::new(router).http(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
+struct Server;
 
-    println!("Server started on port 8080");
+impl Server {
+    pub fn run() {
+        let mut router = Router::new();
+        router.get("/files", http_all_get, "get_files");
+        router.get("/files/:file_id", http_get, "get_file");
+        router.post("/file/push", http_push, "http_push");
+        router.post("/file/pull", http_pull, "http_pull");
+        router.post("/file/sync", http_sync_file, "http_sync_file");
+        router.post("/file", http_post, "post_file");
+        router.delete("/files/:file_id", http_delete, "delete_file");
+
+        Iron::new(router).http(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
+
+        println!("Server started on port 8080");
+
+    }
 }
 
 #[derive(RustcEncodable,RustcDecodable,Debug)]
@@ -248,4 +251,55 @@ impl RcFile {
 
         Ok(())
     }
+}
+
+mod tests {
+
+    use super::*;
+    use Server;
+    use std::thread;
+    use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use hyper::Client;
+    use hyper::header::{Headers, ContentType};
+    use hyper::mime::{Mime, TopLevel, SubLevel, Attr, Value};
+
+    fn start() {
+        thread::spawn(|| {
+            Server::run();
+        });
+    }
+
+    #[test]
+    fn test_post() {
+        self::start();
+        let json = "
+           {
+             'filename':'test',
+             'file_id' : \
+                    '9df4b4f3-efbb-409a-aa26-0d2ccd2e164d',
+             'payload' : 'dGVzdA=='
+                    }
+           ";
+
+        let mut client = Client::new();
+
+        let mut headers = Headers::new();
+
+        headers.set(ContentType(Mime(TopLevel::Application,
+                                     SubLevel::Json,
+                                     vec![(Attr::Charset, Value::Utf8)])));
+
+        let response = client.post("http://127.0.0.1:8080/file")
+            .header(ContentType(Mime(TopLevel::Application,
+                                     SubLevel::Json,
+                                     vec![(Attr::Charset, Value::Utf8)])))
+            .body(json)
+            .send();
+
+        println!("{:?}", response);
+
+        assert!(Path::new(&format!("data/{}", "9df4b4f3-efbb-409a-aa26-0d2ccd2e164d")).exists());
+    }
+
 }
