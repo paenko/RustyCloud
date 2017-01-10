@@ -56,24 +56,6 @@ fn http_get(req: &mut Request) -> IronResult<Response> {
     Ok(res)
 }
 
-fn http_post(req: &mut Request) -> IronResult<Response> {
-    let json_body = req.get::<bjson>().unwrap();
-
-    let doc: RcFile = json::decode(&json_body.unwrap().to_string()).unwrap();
-
-    let mut f = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(format!("./data/{}", doc.file_id))
-        .unwrap();
-
-    encode_into(&doc, &mut f, SizeLimit::Infinite);
-
-    Ok(Response::with((status::Ok, json::encode(&doc.file_id).unwrap())))
-}
-
-
-
 fn http_delete(req: &mut Request) -> IronResult<Response> {
     let ref file_id = req.extensions
         .get::<Router>()
@@ -93,19 +75,25 @@ fn http_delete(req: &mut Request) -> IronResult<Response> {
 fn http_push(req: &mut Request) -> IronResult<Response> {
     let json_body = req.get::<bjson>().unwrap();
 
-    let doc: Vec<(Uuid, DateTime<UTC>)> = json::decode(&json_body.unwrap().to_string()).unwrap();
-
-    let mut requesting: Vec<Uuid> = Vec::new();
-
+    let doc: RcFile = json::decode(&json_body.unwrap().to_string()).unwrap();
     let files = RcFile::get_all();
 
-    for (id, time) in doc {
-        if (false) {
-            requesting.push(id);
-        }
-    }
+    let mut index = files.iter().position(|ref x| doc.file_id == x.file_id);
 
-    Ok(Response::with((status::Ok, json::encode(&requesting).unwrap())))
+    let id = match index {
+        Some(index) => {
+            let id = files[index].file_id;
+            RcFile::update(id, doc.payload);
+            id
+        }
+        None => {
+            let f = RcFile::post(doc.file_id, doc.filename, doc.payload, doc.lastEdited).unwrap();
+            f.file_id
+        }
+    };
+
+
+    Ok(Response::with((status::Ok, format!("{}", id))))
 }
 
 // Update on client
@@ -140,28 +128,28 @@ fn system_time_to_date_time(t: SystemTime) -> DateTime<UTC> {
     UTC.timestamp(sec, nsec)
 }
 
-fn http_sync_file(req: &mut Request) -> IronResult<Response> {
-    let map = req.get_ref::<Params>().unwrap();
-
-    match map.find(&["payload"]) {
-        Some(&Value::String(ref payload)) => {
-            match map.find(&["fileid"]) {
-                Some(&Value::String(ref file_id)) => {
-                    let mut file = RcFile::get(Uuid::parse_str(file_id).unwrap()).unwrap();
-                    file.payload = payload.to_string();
-
-                    let mut file_handler = File::open(&file.filename).unwrap();
-
-                    encode_into(&file, &mut file_handler, SizeLimit::Infinite);
-
-                    Ok(Response::with(status::Ok))
-                } 
-                _ => Ok(Response::with(iron::status::NotFound)),
-            }
-        }
-        _ => Ok(Response::with(iron::status::NotFound)),
-    }
-}
+// fn http_sync_file(req: &mut Request) -> IronResult<Response> {
+// let map = req.get_ref::<Params>().unwrap();
+//
+// match map.find(&["payload"]) {
+// Some(&Value::String(ref payload)) => {
+// match map.find(&["fileid"]) {
+// Some(&Value::String(ref file_id)) => {
+// let mut file = RcFile::get(Uuid::parse_str(file_id).unwrap()).unwrap();
+// file.payload = payload.to_string();
+//
+// let mut file_handler = File::open(&file.filename).unwrap();
+//
+// encode_into(&file, &mut file_handler, SizeLimit::Infinite);
+//
+// Ok(Response::with(status::Ok))
+// }
+// _ => Ok(Response::with(iron::status::NotFound)),
+// }
+// }
+// _ => Ok(Response::with(iron::status::NotFound)),
+// }
+// }
 
 fn main() {
     Server::run();
@@ -176,8 +164,8 @@ impl Server {
         router.get("/files/:file_id", http_get, "get_file");
         router.post("/file/push", http_push, "http_push");
         router.post("/file/pull", http_pull, "http_pull");
-        router.post("/file/sync", http_sync_file, "http_sync_file");
-        router.post("/file", http_post, "post_file");
+        //  router.post("/file/sync", http_sync_file, "http_sync_file");
+        //   router.post("/file", http_post, "post_file");
         router.delete("/files/:file_id", http_delete, "delete_file");
 
         Iron::new(router).http(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
@@ -192,14 +180,16 @@ struct RcFile {
     filename: String,
     file_id: Uuid,
     payload: String,
+    lastEdited: DateTime<UTC>,
 }
 
 impl RcFile {
-    fn new(filename: String, file_id: Uuid, payload: String) -> Self {
+    fn new(filename: String, file_id: Uuid, payload: String, lastEdited: DateTime<UTC>) -> Self {
         RcFile {
             filename: filename,
             file_id: file_id,
             payload: payload,
+            lastEdited: lastEdited,
         }
     }
 
@@ -239,7 +229,7 @@ impl RcFile {
             .create(true)
             .open(format!("./data/{}", file_id))
             .unwrap();
-        let rc = RcFile::new(filename, file_id, payload);
+        let rc = RcFile::new(filename, file_id, payload, lastEdited);
 
         try!(encode_into(&rc, &mut f, SizeLimit::Infinite));
 
@@ -251,55 +241,18 @@ impl RcFile {
 
         Ok(())
     }
-}
 
-mod tests {
+    fn update(file_id: Uuid, payload: String) {
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create(false)
+            .open(format!("./data/{}", file_id))
+            .unwrap();
 
-    use super::*;
-    use Server;
-    use std::thread;
-    use std::path::Path;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use hyper::Client;
-    use hyper::header::{Headers, ContentType};
-    use hyper::mime::{Mime, TopLevel, SubLevel, Attr, Value};
+        let mut rc = RcFile::get(file_id).unwrap();
 
-    fn start() {
-        thread::spawn(|| {
-            Server::run();
-        });
+        rc.payload = payload;
+
+        encode_into(&rc, &mut f, SizeLimit::Infinite);
     }
-
-    #[test]
-    fn test_post() {
-        self::start();
-        let json = "
-           {
-             'filename':'test',
-             'file_id' : \
-                    '9df4b4f3-efbb-409a-aa26-0d2ccd2e164d',
-             'payload' : 'dGVzdA=='
-                    }
-           ";
-
-        let mut client = Client::new();
-
-        let mut headers = Headers::new();
-
-        headers.set(ContentType(Mime(TopLevel::Application,
-                                     SubLevel::Json,
-                                     vec![(Attr::Charset, Value::Utf8)])));
-
-        let response = client.post("http://127.0.0.1:8080/file")
-            .header(ContentType(Mime(TopLevel::Application,
-                                     SubLevel::Json,
-                                     vec![(Attr::Charset, Value::Utf8)])))
-            .body(json)
-            .send();
-
-        println!("{:?}", response);
-
-        assert!(Path::new(&format!("data/{}", "9df4b4f3-efbb-409a-aa26-0d2ccd2e164d")).exists());
-    }
-
 }
