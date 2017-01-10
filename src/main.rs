@@ -102,13 +102,14 @@ fn http_pull(req: &mut Request) -> IronResult<Response> {
     let mut result: Vec<(Uuid, DateTime<UTC>)> = Vec::new();
 
     for f in files {
-        let attr = metadata(f.filename).unwrap();
+        let attr = metadata(format!("data/{}", f.file_id))
+            .expect(&format!("Cannot find data {}", f.file_id));
         let time = attr.modified().unwrap();
 
         result.push((f.file_id, system_time_to_date_time(time)));
     }
 
-    Ok(Response::with((status::Ok, json::encode(&result).unwrap())))
+    Ok(Response::with((status::Ok, json::encode(&result).expect(""))))
 }
 
 fn system_time_to_date_time(t: SystemTime) -> DateTime<UTC> {
@@ -163,7 +164,7 @@ impl Server {
         router.get("/files", http_all_get, "get_files");
         router.get("/files/:file_id", http_get, "get_file");
         router.post("/file/push", http_push, "http_push");
-        router.post("/file/pull", http_pull, "http_pull");
+        router.get("/file/pull", http_pull, "http_pull");
         //  router.post("/file/sync", http_sync_file, "http_sync_file");
         //   router.post("/file", http_post, "post_file");
         router.delete("/files/:file_id", http_delete, "delete_file");
@@ -195,7 +196,7 @@ impl RcFile {
 
     fn get_all() -> Vec<RcFile> {
         let mut files: Vec<RcFile> = Vec::new();
-        let paths = read_dir("./data").unwrap();
+        let paths = read_dir("./data").expect("Cannot find data");
 
         for path in paths {
             let file_name: String = path.unwrap().path().to_str().unwrap().to_string();
