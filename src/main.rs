@@ -2,6 +2,7 @@
 extern crate rustc_serialize;
 extern crate uuid;
 extern crate bincode;
+#[macro_use]
 extern crate iron;
 extern crate router;
 extern crate params;
@@ -35,17 +36,16 @@ use chrono::*;
 fn http_all_get(req: &mut Request) -> IronResult<Response> {
     let files = RcFile::get_all();
 
-    let json = json::encode(&files).unwrap();
+    let json = itry!(json::encode(&files));
 
     Ok(Response::with((status::Ok, json)))
 }
 
 fn http_get(req: &mut Request) -> IronResult<Response> {
-    let ref file_id = req.extensions
+    let ref file_id = iexpect!(req.extensions
         .get::<Router>()
         .unwrap()
-        .find("file_id")
-        .unwrap();
+        .find("file_id"));
 
     let document: RcFile = RcFile::get(Uuid::parse_str(file_id).unwrap()).unwrap();
 
@@ -57,15 +57,15 @@ fn http_get(req: &mut Request) -> IronResult<Response> {
 }
 
 fn http_delete(req: &mut Request) -> IronResult<Response> {
-    let ref file_id = req.extensions
+    let ref file_id = iexpect!(req.extensions
         .get::<Router>()
         .unwrap()
-        .find("file_id")
-        .unwrap();
+        .find("file_id"));
 
-    let res = match RcFile::delete(Uuid::parse_str(file_id).unwrap()) {
-        Ok(_) => Response::with((status::Ok)),
-        Err(err) => Response::with((status::InternalServerError, err.description())),
+    let uuid = itry!(Uuid::parse_str(file_id));
+    let res = match RcFile::delete(uuid) {
+        Ok(()) => Response::with((status::Ok)),
+        Err(_) => Response::with((status::InternalServerError)),
     };
 
     Ok(res)
@@ -73,9 +73,10 @@ fn http_delete(req: &mut Request) -> IronResult<Response> {
 
 // Update on server
 fn http_push(req: &mut Request) -> IronResult<Response> {
-    let json_body = req.get::<bjson>().unwrap();
+    let json_body = itry!(req.get::<bjson>());
 
     let doc: RcFile = json::decode(&json_body.unwrap().to_string()).unwrap();
+
     let files = RcFile::get_all();
 
     let mut index = files.iter().position(|ref x| doc.file_id == x.file_id);
@@ -87,7 +88,7 @@ fn http_push(req: &mut Request) -> IronResult<Response> {
             id
         }
         None => {
-            let f = RcFile::post(doc.file_id, doc.filename, doc.payload, doc.lastEdited).unwrap();
+            let f = itry!(RcFile::post(doc.file_id, doc.filename, doc.payload, doc.lastEdited));
             f.file_id
         }
     };
@@ -165,8 +166,6 @@ impl Server {
         router.get("/files/:file_id", http_get, "get_file");
         router.post("/file/push", http_push, "http_push");
         router.get("/file/pull", http_pull, "http_pull");
-        //  router.post("/file/sync", http_sync_file, "http_sync_file");
-        //   router.post("/file", http_post, "post_file");
         router.delete("/files/:file_id", http_delete, "delete_file");
 
         Iron::new(router).http(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080));
@@ -229,7 +228,8 @@ impl RcFile {
             .write(true)
             .create(true)
             .open(format!("./data/{}", file_id))
-            .unwrap();
+            .expect("Cannot find the ./data folder");
+
         let rc = RcFile::new(filename, file_id, payload, lastEdited);
 
         try!(encode_into(&rc, &mut f, SizeLimit::Infinite));
@@ -248,7 +248,7 @@ impl RcFile {
             .write(true)
             .create(false)
             .open(format!("./data/{}", file_id))
-            .unwrap();
+            .expect("Cannot find the ./data folder");
 
         let mut rc = RcFile::get(file_id).unwrap();
 
